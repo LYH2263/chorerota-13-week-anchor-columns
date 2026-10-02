@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from app import seed
 from app.db import connect
 from app.engines.rota import build_week_slots, swap_legal, apply_swap
+from app.modules.week_anchor import parse_anchor, current_anchor, stamp_week
 
 app = FastAPI(title="Chorerota", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -70,6 +71,7 @@ def generate(week_id: int, body: GenBody = GenBody()):
     for s in slots:
         c.execute("INSERT INTO assignments(week_id,day,task_id,member_id) VALUES (?,?,?,?)",
                   (week_id, s["day"], s["task_id"], s["member_id"]))
+    stamp_week(c, week_id, current_anchor(c))
     c.execute("UPDATE weeks SET status='ready' WHERE id=?", (week_id,))
     c.commit(); c.close()
     return {"count": len(slots), "slots": slots}
@@ -120,6 +122,11 @@ def get_settings():
 
 @app.put("/api/settings")
 def put_settings(body: dict):
+    if "week_anchor" in body:
+        try:
+            body["week_anchor"] = parse_anchor(body["week_anchor"])
+        except ValueError:
+            raise HTTPException(400, "anchor_out_of_range")
     c = connect()
     for k, v in body.items():
         c.execute("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, str(v)))

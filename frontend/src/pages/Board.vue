@@ -9,7 +9,7 @@
     <p v-if="err" class="err">{{ err }}</p>
     <div class="week-grid">
       <article v-for="d in days" :key="d" class="week-card">
-        <header>Day {{ d }}</header>
+        <header>{{ labelFor(d, anchor) }} <span class="muted" style="font-size:11px">day {{ d }}</span></header>
         <div v-for="a in byDay(d)" :key="a.id">
           <span class="chip">{{ a.task_title }}</span>
           <span class="chip coral">{{ a.member_name }}</span>
@@ -22,8 +22,10 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { api } from '../api'
+import { labelFor } from '../lib/anchor'
 const assigns = ref([])
 const days = [0,1,2,3,4,5,6]
+const anchor = ref(0)
 const err = ref('')
 const weekId = 1
 function byDay(d) { return assigns.value.filter(a => a.day === d) }
@@ -32,6 +34,7 @@ async function load() {
   try {
     const b = await api('/weeks/' + weekId + '/board')
     assigns.value = b.assignments || []
+    anchor.value = b.week.week_anchor ?? 0
   } catch (e) { err.value = e.message }
 }
 async function generate() {
