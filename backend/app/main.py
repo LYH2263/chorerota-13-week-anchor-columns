@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from app import seed
 from app.db import connect
 from app.engines.rota import build_week_slots, swap_legal, apply_swap
+from app.modules.anchor_snapshot import validate_anchor, current_anchor, pin_week_anchor, SETTING_KEY
+from app.modules.anchor_projection import resolve_anchor, project_columns
 
 app = FastAPI(title="Chorerota", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -49,11 +51,20 @@ def week_board(week_id: int):
     assigns = [dict(r) for r in c.execute("SELECT * FROM assignments WHERE week_id=?", (week_id,))]
     members = {r["id"]: r["name"] for r in c.execute("SELECT id,name FROM members")}
     tasks = {r["id"]: r["title"] for r in c.execute("SELECT id,title FROM tasks")}
+    live_anchor = current_anchor(c)
     c.close()
     for a in assigns:
         a["member_name"] = members.get(a["member_id"], "?")
         a["task_title"] = tasks.get(a["task_id"], "?")
-    return {"week": dict(week), "assignments": assigns}
+    # 钉锚优先：已生成周吃写入时锚；草稿周回落现行锚预览
+    anchor = resolve_anchor(week["week_anchor"], live_anchor)
+    return {
+        "week": dict(week),
+        "assignments": assigns,
+        "week_anchor": anchor,
+        "anchor_pinned": week["week_anchor"] is not None,
+        "columns": project_columns(7, anchor),
+    }
 
 class GenBody(BaseModel):
     days: int = 7
@@ -70,6 +81,7 @@ def generate(week_id: int, body: GenBody = GenBody()):
     for s in slots:
         c.execute("INSERT INTO assignments(week_id,day,task_id,member_id) VALUES (?,?,?,?)",
                   (week_id, s["day"], s["task_id"], s["member_id"]))
+    pin_week_anchor(c, week_id)  # 生成即钉锚，此后改设置不回溯本周
     c.execute("UPDATE weeks SET status='ready' WHERE id=?", (week_id,))
     c.commit(); c.close()
     return {"count": len(slots), "slots": slots}
@@ -120,6 +132,12 @@ def get_settings():
 
 @app.put("/api/settings")
 def put_settings(body: dict):
+    # 锚越界拒写整个设置：先校验，通过才落库
+    if SETTING_KEY in body:
+        try:
+            body = {**body, SETTING_KEY: validate_anchor(body[SETTING_KEY])}
+        except ValueError:
+            raise HTTPException(400, "week_anchor_out_of_range")
     c = connect()
     for k, v in body.items():
         c.execute("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, str(v)))

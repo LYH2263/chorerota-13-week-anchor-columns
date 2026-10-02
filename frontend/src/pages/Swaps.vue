@@ -2,6 +2,7 @@
   <div>
     <h1 class="brand">对调</h1>
     <p class="muted">先生成周表，再填写两格对调（day + task_id）</p>
+    <p class="muted">day 填存储索引（0–6），与看板列标题「Day n · 周X」对照；对调只写存储索引，不落星期文案。</p>
     <div class="week-card" style="margin-bottom:12px">
       <label>A day <input type="number" v-model.number="form.a_day" /></label>
       <label>A task_id <input type="number" v-model.number="form.a_task" /></label>
